@@ -53,14 +53,15 @@
   }
 
   // QR as a 1-bit pixel matrix with the bar-width reduction (same as Pillow lighter(offset) incl. wrap-around).
-  // Module size: the largest of 5..2 px that fits maxSize (4+ px is the tested-reliable range).
+  // Module size: 4 px (tested reliable incl. the realistic phone test), else 3 / 2 when space forces it.
+  // Not 5: a bigger QR only steals width from the text (user 2026-11-14: text too small).
   function qrBlock(url, maxSize) {
     qrcode.stringToBytes = qrcode.stringToBytesFuncs["UTF-8"];
     const q = qrcode(0, "M");
     q.addData(url, "Byte");
     q.make();
     const n = q.getModuleCount();
-    const s = [5, 4, 3, 2].find((k) => n * k <= maxSize) || 2;
+    const s = [4, 3, 2].find((k) => n * k <= maxSize) || 2;
     const size = n * s;
     let px = new Uint8Array(size * size); // 1 = black
     for (let r = 0; r < n; r++)
@@ -110,16 +111,16 @@
     const bh = K(34);
     rect(0, y, barW - 1, y + bh - 1);
     const line = spec.line || "";
-    const lm = F(line, barW - K(14), 27 * k, "Regular");
+    const lm = F(line, barW - K(14), 28 * k, "Bold");
     put(line, lm, K(7), y + bh / 2 + (lm.a - lm.d) / 2, true);
     if (hex) {
-      const hm = F(hex, W - barW - K(10), 27 * k, "Regular");
+      const hm = F(hex, W - barW - K(10), 28 * k, "Bold");
       put(hex, hm, W - hm.w + adj.hexRight, y + bh / 2 + (hm.a - hm.d) / 2);
     }
     y += bh + K(7);
 
     const color = spec.color || "";
-    const cm = F(color, W, 32 * k, "Bold");
+    const cm = F(color, W, 38 * k, "Bold");
     put(color, cm, 0, y + cm.a);
     const headerBottom = Math.ceil(y + cm.a + Math.max(cm.d, 0));
 
@@ -136,14 +137,14 @@
     const flags = (spec.flags || []).filter(Boolean);
     const opened = spec.opened !== false;
     if (opened) {
-      const om = M("Opened:", 19 * k, "Regular");
+      const om = M("Opened:", 22 * k, "Bold");
       const base = H - 1 - om.d - 1;               // text sits just above the rule row
       put("Opened:", om, 0, base);
       rect(om.w + K(6), H - 1, colW - 1, H - 1);   // rule on the very last row
       bottom = base - om.a - K(6);
     }
     if (flags.length) {
-      const ch = K(24), gap = K(3), fm = (s) => M(s, 18 * k, "cond");
+      const ch = K(28), gap = K(3), fm = (s) => M(s, 22 * k, "cond");
       const rows = [[]]; let x = 0;
       for (const fl of flags) {
         const w = Math.round(fm(fl).w) + K(12);
@@ -164,39 +165,47 @@
     }
 
     // ---- table, top-aligned under the header (pinned to the bottom when nothing else reaches it)
-    const rows = (spec.rows || []).filter(([, v]) => v);
+    const SHORT = { "Bed Temp": "Bed", "Flow Ratio": "Flow" };   // short labels leave the values more room
+    const rows = (spec.rows || []).filter(([, v]) => v).map(([lab, v]) => [SHORT[lab] || lab, v]);
     const tableTop = headerBottom + K(12);
     const pinBottom = !hasQr && !opened && !flags.length && rows.length;
     const avail = (pinBottom ? H : bottom) - tableTop;
-    // largest text (up to 28 px at full width) whose rows fit the height and where label + widest value fit beside
-    // the QR; below 12 px only the height has to fit and the values shrink on their own instead
-    let size = Math.max(10, Math.round(28 * W / 384)), pitch, labW, labs;
-    const widestAt = (sz) => Math.max(0, ...rows.map(([, v]) => M(v, sz, "Regular").w));
+    // largest text (up to 46 px at full width) whose rows fit the height and where label + widest value fit beside
+    // the QR, so the table fills the space; below 12 px only the height has to fit and the values shrink instead.
+    // Labels: Barlow Condensed SemiBold (bold but narrow); values: Barlow Semi Condensed Bold.
+    const LAB = "cond", VAL = "Bold";
+    let size = Math.max(10, Math.round((pinBottom ? 80 : 46) * W / 384)), pitch, labW, labs;   // the table may grow bigger when it has the whole lower area
+    const widestAt = (sz) => Math.max(0, ...rows.map(([, v]) => M(v, sz, VAL).w));
     for (;;) {
-      pitch = size + Math.max(2, Math.round(size * 0.3));
-      labs = rows.map(([lab]) => M(lab + ":", size, "Regular"));
+      pitch = size + Math.max(2, Math.round(size * 0.22));
+      labs = rows.map(([lab]) => M(lab + ":", size, LAB));
       labW = Math.max(0, ...labs.map((m) => m.w));
       const fitsH = rows.length * pitch <= avail;
-      const fitsW = labW + K(10) + widestAt(size) <= colW;
+      const fitsW = labW + K(8) + widestAt(size) <= colW;
       if ((fitsH && (fitsW || size <= 11)) || size <= 10) break;
       size--;
     }
-    // spread the rows over spare height (all of it when the table is what reaches the bottom edge)
+    const cx = Math.ceil(labW) + K(8);
+    const widest = rows.reduce((best, [, v]) => (M(v, size, VAL).w > M(best, size, VAL).w ? v : best), "");
+    const vsize = F(widest, colW - cx, size, VAL).size;
+    // first row starts right under the header; spare height goes BETWEEN rows (justified top to bottom when
+    // the table is what reaches the bottom edge, otherwise capped so rows don't drift apart)
     if (rows.length) {
-      const spare = avail - rows.length * pitch;
-      if (pinBottom) pitch = Math.max(pitch, Math.floor(avail / rows.length));
-      else if (spare > 0) pitch += Math.min(Math.floor(spare / rows.length), Math.round(size * 0.6));
+      const asc = Math.max(...rows.map(([lab, v]) => Math.max(M(lab + ":", size, LAB).a, M(v, vsize, VAL).a)));
+      const rowH = Math.ceil(asc + size * 0.05);
+      let step = pitch;
+      if (pinBottom) step = rows.length > 1 ? Math.min((avail - rowH) / (rows.length - 1), size * 1.6) : 0;
+      else if (rows.length > 1) {
+        const spare = avail - ((rows.length - 1) * pitch + rowH);
+        if (spare > 0) step += Math.min(spare / (rows.length - 1), size * 0.9);
+      }
+      const first = pinBottom ? H - rowH - (rows.length - 1) * step + adj.bottom : tableTop;   // pinned: the block sits on the bottom edge
+      rows.forEach(([lab, v], i) => {
+        const base = Math.round(first + asc + i * step);
+        put(lab + ":", labs[i], 0, base);
+        put(v, M(v, vsize, VAL), cx, base);
+      });
     }
-    const cx = Math.ceil(labW) + K(10);
-    const widest = rows.reduce((best, [, v]) => (M(v, size, "Regular").w > M(best, size, "Regular").w ? v : best), "");
-    const vsize = F(widest, colW - cx, size, "Regular").size;
-    let ty = pinBottom ? H - rows.length * pitch + adj.bottom : tableTop;
-    rows.forEach(([lab, v], i) => {
-      const base = ty + labs[i].a + Math.round((pitch - size) / 2);
-      put(lab + ":", labs[i], 0, base);
-      put(v, M(v, vsize, "Regular"), cx, base);
-      ty += pitch;
-    });
 
     return q;
   }
