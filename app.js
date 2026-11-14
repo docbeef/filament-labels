@@ -151,6 +151,9 @@ function showEditor(srcText, custom) {
   $("#src").textContent = srcText;
   $("#customnote").hidden = !custom;
   $("#forget").hidden = !(current && current.saved);
+  // copy is offered for database filaments and saved customs, not for a new custom that isn't saved yet
+  $("#clone").hidden = !!(current && current.custom && !current.saved);
+  $("#clone").textContent = current && current.saved ? "⧉ Duplicate as a new filament" : "⧉ Copy as my own filament";
   $("#results").hidden = true; $("#editor").hidden = false; $("#bar").hidden = false;
   $("#status").hidden = true;
   window.scrollTo(0, 0);
@@ -195,12 +198,27 @@ function openCustom(saved, query) {
     if (guess) { applyMaterial(guess); e.line.value = guess; }
     setQrOptions([]);
   }
-  showEditor(saved ? "Your saved custom label." : "Custom label: fill in what's on the box. Pick a material to get typical temps.", true);
+  if (saved) current.basedOn = saved.values.basedOn;
+  showEditor(saved ? `Your saved custom label${saved.values.basedOn ? ` (copied from ${saved.values.basedOn})` : ""}.`
+    : "Custom label: fill in what's on the box. Pick a material to get typical temps.", true);
   if (!saved) e.brand.focus({ preventScroll: true });
+}
+
+// Keep every value on screen (incl. typ marks and the QR choice) but turn it into a new, unsaved custom.
+// Saving then stores it as a new ★ filament; the database entry or the original custom is untouched.
+function copyAsCustom() {
+  const e = $("#f").elements;
+  const from = current && current.custom
+    ? `your “${[e.brand.value, e.line.value, e.color.value].filter(Boolean).join(" ")}”`
+    : `${current.item.f.brand} ${lineOf(current.item.f)} ${current.item.color}`;
+  current = { custom: true, saved: null, basedOn: from };
+  showEditor(`Copy of ${from}. Change anything, then Save to keep it as your own filament.`, true);
+  e.color.focus({ preventScroll: true }); e.color.select();
 }
 
 function formValues() {
   const e = $("#f").elements, v = { material: e.material.value, typ: [] };
+  if (current && current.basedOn) v.basedOn = current.basedOn;
   for (const k of FIELDS) { v[k] = e[k].value.trim(); if (e[k].classList.contains("typ")) v.typ.push(k); }
   for (const k of CHECKS) v[k] = e[k].checked;
   return v;
@@ -246,6 +264,7 @@ function rememberCustom() {
   if (!c) { c = { id: Date.now().toString(36) }; customs.unshift(c); current.saved = c; }
   c.values = values; indexCustom(c); storeCustoms();
   $("#forget").hidden = false;
+  $("#clone").hidden = false; $("#clone").textContent = "⧉ Duplicate as a new filament";
 }
 
 async function save() {
@@ -290,6 +309,7 @@ $("#forget").onclick = () => {
   customs = customs.filter((c) => c !== current.saved); storeCustoms();
   current.saved = null; backToSearch();
 };
+$("#clone").onclick = copyAsCustom;
 $("#save").onclick = save;
 $("#share").onclick = share;
 try {
