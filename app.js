@@ -246,7 +246,7 @@ function draw() {
   const c = $("#label"); c.width = out.width; c.height = out.height;
   c.getContext("2d").drawImage(out, 0, 0);
   lastCanvas = out;
-  $("#len").textContent = `${(out.height / 8).toFixed(0)} mm long · 48 mm printed width`;
+  $("#len").textContent = "48 × 48 mm (384 × 384 px) · ink edge to edge";
 }
 
 function fileName() {
@@ -254,7 +254,7 @@ function fileName() {
   return ([s.brand, s.line, s.color].map((x) => x.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")).filter(Boolean).join("_") || "custom-label") + ".png";
 }
 
-function blob() { return new Promise((res) => lastCanvas.toBlob(res, "image/png")); }
+function blob() { return LabelRender.toPngBlob(lastCanvas); }   // 384 x 384 px, tagged 203 dpi = 48 x 48 mm
 
 function rememberCustom() {
   if (!current || !current.custom) return;
