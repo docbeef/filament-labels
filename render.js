@@ -2,8 +2,8 @@
 // Output: exactly the chosen size (default 48 x 48 mm = 384 x 384 px at 8 dots/mm), 1-bit, and the INK
 // touches all four edges: no white margin (user spec 2026-11-14). The 53 mm roll's paper margin is the
 // QR's quiet zone on the right and bottom. Width is capped at 48 mm, the M02's print width.
-//   top    : brand wordmark          left  : the black line bar (x = 0)
-//   right  : QR (or hex / full bar)  bottom: QR, else the "Opened" rule, else the last pinned row
+//   top    : QR (top-right) or brand left  : the black line bar (x = 0)
+//   right  : QR, else the full-width bar  bottom: the "Opened" rule, else flags, else the last pinned row
 /* global qrcode */
 (function (root) {
   "use strict";
@@ -99,61 +99,62 @@
     const M = (s, size, weight) => Object.assign(ink(ctx, s, Math.max(10, Math.round(size)), weight), { weight });
     const F = (s, maxW, size, weight) => Object.assign(fitInk(ctx, s, maxW, size, weight), { weight });
 
-    // ---- header (shifted by adj.top so its ink starts on row 0)
-    let y = adj.top;
+    // ---- QR, TOP-right corner (user 2026-11-14: text too small). Up here it only shares height with the header,
+    // so the table below gets the full width. Ink reaches the top and right edges.
+    const hasQr = !!spec.qr_url, hex = spec.hex || "";
+    let q = null, hw = W;                                       // hw: header width left of the QR
+    if (hasQr) {
+      q = qrBlock(spec.qr_url, Math.min(Math.floor(W * 0.55), Math.floor(H * 0.55)));   // room for 4 px modules on product-page links
+      hw = W - q.size - 2 * q.s;                                // 2-module quiet zone left of the QR
+    }
+
+    // ---- header, left of the QR (shifted by adj.top so its ink starts on row 0 when there is no QR)
+    let y = q ? 0 : adj.top;
     const brand = spec.brand || "";
-    const bm = F(brand, W, 52 * k, "Bold");
+    const bm = F(brand, hw, 52 * k, "Bold");
     put(brand, bm, 0, y + bm.a);
     y += bm.a + Math.max(bm.d, 0) + K(6);
 
-    const hasQr = !!spec.qr_url, hex = spec.hex || "";
-    const barW = hex || hasQr ? Math.floor(W * 0.62) : W;    // full-width bar keeps the right edge inked
-    const bh = K(34);
+    // black line bar with the hex code inside it on the right; full width (to the right edge) when there's no QR
+    const barW = q ? hw : W;
+    const bh = K(36);
     rect(0, y, barW - 1, y + bh - 1);
+    let hm = null;
+    if (hex) hm = F(hex, barW * 0.42, 22 * k, "Bold");
     const line = spec.line || "";
-    const lm = F(line, barW - K(14), 28 * k, "Bold");
+    const lm = F(line, barW - K(14) - (hm ? hm.w + K(10) : 0), 30 * k, "Bold");
     put(line, lm, K(7), y + bh / 2 + (lm.a - lm.d) / 2, true);
-    if (hex) {
-      const hm = F(hex, W - barW - K(10), 28 * k, "Bold");
-      put(hex, hm, W - hm.w + adj.hexRight, y + bh / 2 + (hm.a - hm.d) / 2);
-    }
-    y += bh + K(7);
+    if (hm) put(hex, hm, barW - K(7) - hm.w, y + bh / 2 + (hm.a - hm.d) / 2, true);
+    y += bh + K(6);
 
     const color = spec.color || "";
-    const cm = F(color, W, 38 * k, "Bold");
+    const cm = F(color, hw, 38 * k, "Bold");
     put(color, cm, 0, y + cm.a);
-    const headerBottom = Math.ceil(y + cm.a + Math.max(cm.d, 0));
+    const textBottom = Math.ceil(y + cm.a + Math.max(cm.d, 0));
+    const headerBottom = Math.max(textBottom, q ? q.size + 2 * q.s : 0);   // QR's quiet zone below it
 
-    // ---- QR, bottom-right corner (ink to the right and bottom edges)
-    let q = null, colW = W;
-    if (hasQr) {
-      const room = Math.min(H - headerBottom - K(10), Math.floor(W * 0.55));   // leave the table half the width
-      q = qrBlock(spec.qr_url, room);
-      colW = W - q.size - 2 * q.s;                 // 2-module quiet zone to the left of the QR
-    }
-
-    // ---- bottom group, pinned to the bottom edge: flags then "Opened:" with its rule on the last row
+    // ---- bottom group, full width, pinned to the bottom edge: flags then "Opened:" with its rule on the last row
     let bottom = H;
     const flags = (spec.flags || []).filter(Boolean);
     const opened = spec.opened !== false;
     if (opened) {
-      const om = M("Opened:", 22 * k, "Bold");
+      const om = M("Opened:", 24 * k, "Bold");
       const base = H - 1 - om.d - 1;               // text sits just above the rule row
       put("Opened:", om, 0, base);
-      rect(om.w + K(6), H - 1, colW - 1, H - 1);   // rule on the very last row
+      rect(om.w + K(6), H - 1, Math.floor(W * 0.75), H - 1);   // rule on the very last row
       bottom = base - om.a - K(6);
     }
     if (flags.length) {
-      const ch = K(28), gap = K(3), fm = (s) => M(s, 22 * k, "cond");
-      const rows = [[]]; let x = 0;
+      const ch = K(26), gap = K(4), fm = (s) => M(s, 21 * k, "cond");   // the usual three flags fit one row
+      const frows = [[]]; let x = 0;
       for (const fl of flags) {
         const w = Math.round(fm(fl).w) + K(12);
-        if (x && x + w > colW) { rows.push([]); x = 0; }
-        rows[rows.length - 1].push([fl, w, x]); x += w + K(4);
+        if (x && x + w > W) { frows.push([]); x = 0; }
+        frows[frows.length - 1].push([fl, w, x]); x += w + K(5);
       }
       const base = opened ? bottom : H;
-      let top = base - rows.length * (ch + gap) + gap;
-      for (const r of rows) {
+      let top = base - frows.length * (ch + gap) + gap;
+      for (const r of frows) {
         for (const [fl, w, x0] of r) {
           rect(x0, top, x0 + w - 1, top + ch - 1);
           const m = fm(fl);
@@ -161,49 +162,59 @@
         }
         top += ch + gap;
       }
-      bottom = base - rows.length * (ch + gap) - gap;
+      bottom = base - frows.length * (ch + gap) - gap;
     }
 
-    // ---- table, top-aligned under the header (pinned to the bottom when nothing else reaches it)
+    // ---- table between the header and the bottom group (pinned to the bottom edge when nothing else reaches it).
+    // A row level with the QR gets the column left of it (hw); a row below the QR gets the full width.
+    // Two starting points are tried, right under the header text (rows beside the QR: best on short labels) and
+    // right under the QR (all rows full width: best on square/tall labels); the one giving the larger text wins.
+    // Labels: Barlow Condensed SemiBold (bold but narrow); values: Barlow Semi Condensed Bold.
     const SHORT = { "Bed Temp": "Bed", "Flow Ratio": "Flow" };   // short labels leave the values more room
     const rows = (spec.rows || []).filter(([, v]) => v).map(([lab, v]) => [SHORT[lab] || lab, v]);
-    const tableTop = headerBottom + K(12);
-    const pinBottom = !hasQr && !opened && !flags.length && rows.length;
-    const avail = (pinBottom ? H : bottom) - tableTop;
-    // largest text (up to 46 px at full width) whose rows fit the height and where label + widest value fit beside
-    // the QR, so the table fills the space; below 12 px only the height has to fit and the values shrink instead.
-    // Labels: Barlow Condensed SemiBold (bold but narrow); values: Barlow Semi Condensed Bold.
+    const qBand = q ? q.size + 2 * q.s : 0;                     // QR + its quiet zone below
+    const pinBottom = !opened && !flags.length && rows.length;
+    const limitY = pinBottom ? H : bottom;
     const LAB = "cond", VAL = "Bold";
-    let size = Math.max(10, Math.round((pinBottom ? 80 : 46) * W / 384)), pitch, labW, labs;   // the table may grow bigger when it has the whole lower area
-    const widestAt = (sz) => Math.max(0, ...rows.map(([, v]) => M(v, sz, VAL).w));
-    for (;;) {
-      pitch = size + Math.max(2, Math.round(size * 0.22));
-      labs = rows.map(([lab]) => M(lab + ":", size, LAB));
-      labW = Math.max(0, ...labs.map((m) => m.w));
-      const fitsH = rows.length * pitch <= avail;
-      const fitsW = labW + K(8) + widestAt(size) <= colW;
-      if ((fitsH && (fitsW || size <= 11)) || size <= 10) break;
-      size--;
-    }
-    const cx = Math.ceil(labW) + K(8);
-    const widest = rows.reduce((best, [, v]) => (M(v, size, VAL).w > M(best, size, VAL).w ? v : best), "");
-    const vsize = F(widest, colW - cx, size, VAL).size;
-    // first row starts right under the header; spare height goes BETWEEN rows (justified top to bottom when
-    // the table is what reaches the bottom edge, otherwise capped so rows don't drift apart)
+    const plan = (top, size, spread) => {
+      const labs = rows.map(([lab]) => M(lab + ":", size, LAB));
+      const cx = Math.ceil(Math.max(0, ...labs.map((m) => m.w))) + K(8);
+      const asc = Math.max(M("Nb0°", size, VAL).a, M("Nb", size, LAB).a);
+      const rowH = Math.ceil(asc + Math.max(M("y", size, LAB).d, M("0", size, VAL).d, 0));
+      const gap = Math.max(2, Math.round(size * 0.16)) + (spread || 0);
+      let yy = top, ok = true;
+      const pos = rows.map(([, v]) => {
+        const lim = yy < qBand ? hw : W;                       // level with the QR -> narrow column
+        if (cx + M(v, size, VAL).w > lim) ok = false;
+        const p = { base: yy + asc, lim }; yy += rowH + gap; return p;
+      });
+      const end = yy - gap;
+      return { top, size, labs, cx, pos, end, ok: ok && end <= limitY };
+    };
+    const largest = (top) => {
+      for (let size = Math.max(10, Math.round(90 * W / 384)); size >= 10; size--) { const p = plan(top, size); if (p.ok) return p; }
+      return null;
+    };
+    let best = null;
     if (rows.length) {
-      const asc = Math.max(...rows.map(([lab, v]) => Math.max(M(lab + ":", size, LAB).a, M(v, vsize, VAL).a)));
-      const rowH = Math.ceil(asc + size * 0.05);
-      let step = pitch;
-      if (pinBottom) step = rows.length > 1 ? Math.min((avail - rowH) / (rows.length - 1), size * 1.6) : 0;
-      else if (rows.length > 1) {
-        const spare = avail - ((rows.length - 1) * pitch + rowH);
-        if (spare > 0) step += Math.min(spare / (rows.length - 1), size * 0.9);
+      const tops = [textBottom + K(8)];
+      if (q && headerBottom > textBottom) tops.push(headerBottom + K(8));
+      for (const top of tops) { const p = largest(top); if (p && (!best || p.size > best.size)) best = p; }
+      if (!best) best = plan(tops[0], 10);                      // too much to fit: smallest text, values shrink
+    }
+    if (best && rows.length > 1 && !pinBottom) {                // spread spare height between rows, if it still fits
+      const spare = Math.floor((limitY - best.end) / (rows.length - 1));
+      for (let s = Math.min(spare, Math.round(best.size * 0.5)); s > 0; s--) {
+        const p = plan(best.top, best.size, s);
+        if (p.ok) { best = p; break; }
       }
-      const first = pinBottom ? H - rowH - (rows.length - 1) * step + adj.bottom : tableTop;   // pinned: the block sits on the bottom edge
+    }
+    if (best) {
+      const shift = pinBottom ? H - best.end + adj.bottom : 0;  // pinned: the block sits on the bottom edge
       rows.forEach(([lab, v], i) => {
-        const base = Math.round(first + asc + i * step);
-        put(lab + ":", labs[i], 0, base);
-        put(v, M(v, vsize, VAL), cx, base);
+        const p = best.pos[i], base = Math.round(p.base + shift);
+        put(lab + ":", best.labs[i], 0, base);
+        put(v, F(v, p.lim - best.cx, best.size, VAL), best.cx, base);
       });
     }
 
@@ -234,7 +245,7 @@
   }
 
   function paste(ctx, q, W, H) {
-    const x0 = W - q.size, y0 = H - q.size;
+    const x0 = W - q.size, y0 = 0;                          // top-right corner
     const img = ctx.getImageData(x0, y0, q.size, q.size);
     for (let i = 0; i < q.px.length; i++) {
       const v = q.px[i] ? 0 : 255;
