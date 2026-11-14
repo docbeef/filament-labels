@@ -28,6 +28,23 @@
   #customnote[hidden] { display:none; }
   #forget { margin-top:8px; font-size:14px; padding:8px 12px; }
   #clone { width:100%; margin-top:4px; font-weight:600; }
+  dialog { border:1px solid var(--line); border-radius:14px; background:var(--card); color:var(--ink); padding:16px; width:min(420px, calc(100vw - 32px)); }
+  dialog::backdrop { background:rgba(0,0,0,.45); }
+  #sizeForm { display:block; margin:0; }   /* not the editor's two-column grid */
+  dialog h2 { margin:0 0 4px; font-size:18px; }
+  .presets { display:flex; flex-wrap:wrap; gap:6px; margin:10px 0; }
+  .presets button { padding:7px 10px; font-size:14px; }
+  .presets button.on { border-color:var(--acc); color:var(--acc); font-weight:600; }
+  .sizes { display:flex; align-items:end; gap:8px; }
+  .sizes label { flex:1; }
+  .sizes input { font-size:18px; padding:9px 10px; border:1px solid var(--line); border-radius:8px; background:var(--card); color:var(--ink); width:100%; }
+  .sizes .x { padding-bottom:10px; color:var(--mute); }
+  .dlgprev { margin-top:12px; text-align:center; background:var(--bg); border-radius:8px; padding:8px; }
+  .dlgprev canvas { max-width:100%; max-height:38vh; image-rendering:pixelated; outline:1px dashed var(--line); background:#fff; }
+  .warn { color:var(--typ); font-size:13px; margin:4px 0 0; }
+  .warn[hidden] { display:none; }
+  .dlgbtns { display:flex; gap:10px; margin-top:12px; }
+  .dlgbtns .primary { flex:1; }
   #clone[hidden] { display:none; }
   #editor[hidden], #results[hidden] { display:none; }
   .preview { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px; text-align:center; }
@@ -97,6 +114,25 @@
   <button type="button" class="primary" id="save">Save PNG</button>
   <button type="button" id="share" hidden>Share</button>
 </div>
+<dialog id="sizeDlg">
+  <form method="dialog" id="sizeForm">
+    <h2>Image size</h2>
+    <p class="muted">The inked image fills this exactly — no white border. 48 mm is the M02's widest.</p>
+    <div class="presets" id="presets"></div>
+    <div class="sizes">
+      <label>Width (mm)<input type="number" name="w" min="20" max="48" step="1" inputmode="numeric"></label>
+      <span class="x">×</span>
+      <label>Height (mm)<input type="number" name="h" min="20" max="120" step="1" inputmode="numeric"></label>
+    </div>
+    <div class="dlgprev"><canvas id="dlgCanvas"></canvas></div>
+    <p class="muted" id="dlgInfo"></p>
+    <p class="warn" id="dlgWarn" hidden></p>
+    <div class="dlgbtns">
+      <button type="button" id="sizeCancel">Cancel</button>
+      <button type="submit" class="primary" id="sizeOk">Save PNG</button>
+    </div>
+  </form>
+</dialog>
 <script src="qrcode.js"></script>
 <script src="render.js"></script>
 <script src="app.js"></script>

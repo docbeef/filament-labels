@@ -161,6 +161,7 @@ function showEditor(srcText, custom) {
 }
 
 function open(it) {
+  clearTimeout(t);   // a search still pending from typing must not yank the editor away
   current = { item: it };
   const f = it.f, e = $("#f").elements;
   const vals = {
@@ -181,6 +182,7 @@ function open(it) {
 
 // saved = a stored custom label (restore exactly); otherwise a blank one, optionally guessing the material from the search text
 function openCustom(saved, query) {
+  clearTimeout(t);
   current = { custom: true, saved: saved || null };
   const e = $("#f").elements;
   if (saved) {
@@ -240,13 +242,23 @@ function spec() {
   };
 }
 
+// ---------- image size (mm). The last choice is remembered on this phone and pre-selected next time.
+const SIZE_KEY = "filament-labels.size.v1";
+const PRESETS = [[48, 48], [48, 40], [48, 30], [40, 40], [30, 30], [48, 60]];
+function loadSize() {
+  try { const v = JSON.parse(localStorage.getItem(SIZE_KEY) || "null"); if (v) return LabelRender.clampMm(v.w, v.h); } catch (e) { /* none */ }
+  return { w: 48, h: 48 };
+}
+let size = null;   // set on first draw
+
 let lastCanvas = null;
 function draw() {
-  const out = LabelRender.render(spec());
+  size = size || loadSize();
+  const out = LabelRender.render(spec(), { wMm: size.w, hMm: size.h });
   const c = $("#label"); c.width = out.width; c.height = out.height;
   c.getContext("2d").drawImage(out, 0, 0);
   lastCanvas = out;
-  $("#len").textContent = "48 × 48 mm (384 × 384 px) · ink edge to edge";
+  $("#len").textContent = `${size.w} × ${size.h} mm (${out.width} × ${out.height} px) · ink edge to edge · change on Save`;
 }
 
 function fileName() {
@@ -254,7 +266,7 @@ function fileName() {
   return ([s.brand, s.line, s.color].map((x) => x.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")).filter(Boolean).join("_") || "custom-label") + ".png";
 }
 
-function blob() { return LabelRender.toPngBlob(lastCanvas); }   // 384 x 384 px, tagged 203 dpi = 48 x 48 mm
+function blob() { return LabelRender.toPngBlob(lastCanvas); }   // chosen size, tagged 203 dpi
 
 function rememberCustom() {
   if (!current || !current.custom) return;
@@ -288,7 +300,8 @@ function backToSearch() {
 }
 
 // ---------- wiring
-let t = null;
+// (t: the pending-search timer; declared with var so open() can clear it)
+var t = null;
 $("#q").addEventListener("input", (e) => {
   clearTimeout(t);
   t = setTimeout(() => {
@@ -310,8 +323,49 @@ $("#forget").onclick = () => {
   current.saved = null; backToSearch();
 };
 $("#clone").onclick = copyAsCustom;
-$("#save").onclick = save;
-$("#share").onclick = share;
+// Save / Share first ask for the size (pre-filled with the last choice), then write the PNG at that size
+let dlgAction = "save", dlgSize = null;
+function dlgShow(w, h, force) {
+  dlgSize = LabelRender.clampMm(w, h);
+  const f = $("#sizeForm").elements;
+  if (force || document.activeElement !== f.w) f.w.value = dlgSize.w;
+  if (force || document.activeElement !== f.h) f.h.value = dlgSize.h;
+  for (const b of $("#presets").children) b.classList.toggle("on", b.dataset.w == dlgSize.w && b.dataset.h == dlgSize.h);
+  const out = LabelRender.render(spec(), { wMm: dlgSize.w, hMm: dlgSize.h });
+  const c = $("#dlgCanvas"); c.width = out.width; c.height = out.height; c.getContext("2d").drawImage(out, 0, 0);
+  c.style.width = `${Math.round(out.width / 2)}px`;
+  $("#dlgInfo").textContent = `${out.width} × ${out.height} px at 203 dpi = ${dlgSize.w} × ${dlgSize.h} mm of ink.`;
+  const qm = out.labelInfo.qrModule;
+  $("#dlgWarn").hidden = !(qm && qm < 4);
+  $("#dlgWarn").textContent = qm && qm < 4 ? `The QR is small at this size (${qm} px modules); it may not scan. 4+ px is tested reliable — go bigger, or set the QR link to None.` : "";
+}
+function openSizeDialog(action) {
+  dlgAction = action;
+  $("#sizeOk").textContent = action === "share" ? "Share" : "Save PNG";
+  const cur = size || loadSize();
+  dlgShow(cur.w, cur.h);
+  $("#sizeDlg").showModal();
+}
+for (const [w, h] of PRESETS) {
+  const b = document.createElement("button");
+  b.type = "button"; b.textContent = w === h ? `${w} × ${h} square` : `${w} × ${h}`; b.dataset.w = w; b.dataset.h = h;
+  b.onclick = () => dlgShow(w, h);
+  $("#presets").appendChild(b);
+}
+$("#sizeForm").addEventListener("input", () => { const f = $("#sizeForm").elements; if (f.w.value && f.h.value) dlgShow(f.w.value, f.h.value); });
+$("#sizeForm").addEventListener("change", () => { const f = $("#sizeForm").elements; dlgShow(f.w.value, f.h.value, true); });  // snap to the clamped values on blur
+$("#sizeCancel").onclick = () => $("#sizeDlg").close();
+$("#sizeForm").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const f = $("#sizeForm").elements; dlgShow(f.w.value, f.h.value);
+  size = dlgSize;
+  try { localStorage.setItem(SIZE_KEY, JSON.stringify(size)); } catch (err) { /* not remembered, still saves */ }
+  $("#sizeDlg").close();
+  draw();
+  if (dlgAction === "share") share(); else save();
+});
+$("#save").onclick = () => openSizeDialog("save");
+$("#share").onclick = () => openSizeDialog("share");
 try {
   if (navigator.canShare && navigator.canShare({ files: [new File([""], "x.png", { type: "image/png" })] })) $("#share").hidden = false;
 } catch (e) { /* no share */ }
