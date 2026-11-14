@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Filament Labels</title>
+<meta name="theme-color" content="#111111">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+  :root { --bg:#f6f5f2; --card:#fff; --ink:#151515; --mute:#6b6b6b; --line:#dddad3; --acc:#1f6feb; --typ:#a15c00; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+    --bg:#121212; --card:#1d1d1d; --ink:#eee; --mute:#9a9a9a; --line:#333; --acc:#5b9bff; --typ:#e0a050; } }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.4 system-ui, sans-serif; }
+  header { position:sticky; top:0; z-index:2; background:var(--bg); padding:12px 16px 8px; border-bottom:1px solid var(--line); }
+  h1 { font-size:18px; margin:0 0 8px; }
+  #q { width:100%; font-size:17px; padding:12px 14px; border:1px solid var(--line); border-radius:10px; background:var(--card); color:var(--ink); }
+  main { padding:12px 16px 120px; max-width:640px; margin:0 auto; }
+  .muted { color:var(--mute); font-size:13px; }
+  #results { list-style:none; margin:0; padding:0; }
+  #results li { display:flex; gap:12px; align-items:center; padding:10px 4px; border-bottom:1px solid var(--line); cursor:pointer; }
+  #results li:active { background:var(--line); }
+  .sw { width:28px; height:28px; border-radius:50%; flex:none; border:1px solid var(--line); }
+  .r1 { font-weight:600; } .r2 { font-size:13px; color:var(--mute); }
+  #editor[hidden], #results[hidden] { display:none; }
+  .preview { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px; text-align:center; }
+  .preview canvas { width:100%; max-width:384px; image-rendering:pixelated; border:1px dashed var(--line); background:#fff; }
+  form { display:grid; grid-template-columns:1fr 1fr; gap:10px 12px; margin-top:14px; }
+  label { display:flex; flex-direction:column; font-size:13px; color:var(--mute); gap:3px; }
+  label.wide { grid-column:1 / -1; }
+  input[type=text], select { font-size:16px; padding:9px 10px; border:1px solid var(--line); border-radius:8px; background:var(--card); color:var(--ink); width:100%; }
+  input.typ { color:var(--typ); }
+  fieldset { grid-column:1 / -1; border:1px solid var(--line); border-radius:8px; display:flex; flex-wrap:wrap; gap:6px 16px; }
+  fieldset label { flex-direction:row; align-items:center; color:var(--ink); font-size:14px; gap:6px; }
+  .bar { position:fixed; left:0; right:0; bottom:0; display:flex; gap:10px; padding:12px 16px calc(12px + env(safe-area-inset-bottom)); background:var(--bg); border-top:1px solid var(--line); }
+  .bar[hidden] { display:none; }
+  button { font-size:16px; padding:12px 16px; border-radius:10px; border:1px solid var(--line); background:var(--card); color:var(--ink); }
+  button.primary { flex:1; background:var(--acc); color:#fff; border:none; font-weight:600; }
+  .src { margin:6px 0 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Filament Labels <span class="muted" id="ver"></span></h1>
+  <input id="q" type="search" placeholder="Search: bambu pla basic cyan" autocomplete="off" autofocus>
+</header>
+<main>
+  <p class="muted" id="status">Loading database…</p>
+  <ul id="results"></ul>
+
+  <section id="editor" hidden>
+    <div class="preview">
+      <canvas id="label"></canvas>
+      <div class="muted" id="len"></div>
+    </div>
+    <p class="muted src" id="src"></p>
+    <form id="f" autocomplete="off">
+      <label>Brand<input type="text" name="brand"></label>
+      <label>Line<input type="text" name="line"></label>
+      <label>Colour<input type="text" name="color"></label>
+      <label>Hex<input type="text" name="hex"></label>
+      <label>Nozzle<input type="text" name="nozzle"></label>
+      <label>Bed<input type="text" name="bed"></label>
+      <label>Chamber<input type="text" name="chamber"></label>
+      <label>Dry<input type="text" name="dry"></label>
+      <label>Flow ratio<input type="text" name="flow" inputmode="decimal"></label>
+      <label>TD<input type="text" name="td" inputmode="decimal"></label>
+      <fieldset>
+        <label><input type="checkbox" name="fl_hard"> Hardened nozzle</label>
+        <label><input type="checkbox" name="fl_enc"> Enclosure</label>
+        <label><input type="checkbox" name="fl_hygro"> Very hygro</label>
+        <label><input type="checkbox" name="opened" checked> "Opened:" line</label>
+      </fieldset>
+      <label class="wide">QR link
+        <select name="qrpick"></select>
+      </label>
+      <label class="wide"><input type="text" name="qr" placeholder="https://…"></label>
+    </form>
+    <p class="muted">Orange values are typical for the material (median of manufacturer data), not this filament's own — they print with “typ”.</p>
+  </section>
+</main>
+<div class="bar" id="bar" hidden>
+  <button type="button" id="back">← Search</button>
+  <button type="button" class="primary" id="save">Save PNG</button>
+  <button type="button" id="share" hidden>Share</button>
+</div>
+<script src="qrcode.js"></script>
+<script src="render.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
