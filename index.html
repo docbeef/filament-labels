@@ -52,7 +52,7 @@
   form { display:grid; grid-template-columns:1fr 1fr; gap:10px 12px; margin-top:14px; }
   label { display:flex; flex-direction:column; font-size:13px; color:var(--mute); gap:3px; }
   label.wide { grid-column:1 / -1; }
-  input[type=text], select { font-size:16px; padding:9px 10px; border:1px solid var(--line); border-radius:8px; background:var(--card); color:var(--ink); width:100%; }
+  input[type=text], input[type=date], select { font-size:16px; padding:9px 10px; border:1px solid var(--line); border-radius:8px; background:var(--card); color:var(--ink); width:100%; }
   input.typ { color:var(--typ); }
   fieldset { grid-column:1 / -1; border:1px solid var(--line); border-radius:8px; display:flex; flex-wrap:wrap; gap:6px 16px; }
   fieldset label { flex-direction:row; align-items:center; color:var(--ink); font-size:14px; gap:6px; }
@@ -93,18 +93,20 @@
       <label>Dry<input type="text" name="dry"></label>
       <label>Flow ratio<input type="text" name="flow" inputmode="decimal"></label>
       <label>TD<input type="text" name="td" inputmode="decimal"></label>
+      <label class="wide">Purchased date (optional — blank prints a line to write on)
+        <input type="date" name="purchased"></label>
       <fieldset>
         <label><input type="checkbox" name="fl_hard"> Hardened nozzle</label>
         <label><input type="checkbox" name="fl_enc"> Enclosure</label>
         <label><input type="checkbox" name="fl_hygro"> Very hygro</label>
-        <label><input type="checkbox" name="opened" checked> "Opened:" line</label>
+        <label><input type="checkbox" name="opened" checked> "Purchased" + "Opened" lines</label>
       </fieldset>
       <label class="wide">QR link
         <select name="qrpick"></select>
       </label>
       <label class="wide"><input type="text" name="qr" placeholder="https://…"></label>
     </form>
-    <p class="muted">Orange values are typical for the material (median of manufacturer data), not this filament's own — they print with “typ”.</p>
+    <p class="muted">Orange values are typical for the material (median of manufacturer data), not this filament's own — they print with “typ”. Typical drying values are filled in plain.</p>
     <p class="muted" id="customnote" hidden>Custom labels are remembered on this phone when you save them, and show up in search with ★.
       <button type="button" id="forget" hidden>Delete this saved label</button></p>
   </section>

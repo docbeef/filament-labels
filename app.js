@@ -3,8 +3,8 @@
 "use strict";
 const $ = (s) => document.querySelector(s);
 const norm = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
-let DB = null, items = [], customs = [], current = null;
-const FIELDS = ["brand", "line", "color", "hex", "nozzle", "bed", "chamber", "dry", "flow", "td", "qr"];
+let DB = null, items = [], customs = [], current = null, homeStatus = "";
+const FIELDS = ["brand", "line", "color", "hex", "nozzle", "bed", "chamber", "dry", "flow", "td", "qr", "purchased"];
 const CHECKS = ["fl_hard", "fl_enc", "fl_hygro", "opened"];
 const TYP_FIELDS = ["nozzle", "bed", "chamber", "dry"];
 
@@ -30,7 +30,8 @@ async function loadData() {
   for (const m of Object.keys(DB.defaults).sort()) sel.add(new Option(m, m));
   loadCustoms();
   $("#ver").textContent = `· db ${data.version}`;
-  $("#status").textContent = `${items.length.toLocaleString()} colours from ${data.brands.length} brands. Type to search.`;
+  homeStatus = `${items.length.toLocaleString()} colours from ${data.brands.length} brands. Type to search.`;
+  $("#status").textContent = homeStatus;
 }
 
 // ---------- saved custom labels (this device only)
@@ -113,7 +114,8 @@ function defaultsFor(material) {
 }
 const needsEnclosure = (enc) => enc === "required" || enc === "recommended";
 
-// Fill empty (or still-typical) temp fields with the material's typical values, marked "typ".
+// Fill empty (or still-typical) temp fields with the material's typical values. Nozzle / bed / chamber are
+// marked "typ"; drying goes in plain (user 2026-11-14: no "typ" on dry values).
 function applyMaterial(material, ownEnc) {
   const e = $("#f").elements, d = defaultsFor(material);
   const enc = ownEnc || (d.enc ? d.enc[0] : "");
@@ -122,6 +124,11 @@ function applyMaterial(material, ownEnc) {
   for (const k of TYP_FIELDS) {
     const el = e[k];
     if (el.value && !el.classList.contains("typ")) continue;      // never overwrite a real value
+    if (k === "dry") {
+      if (el.value && !el.dataset.dflt) continue;               // a dry value the user typed stays
+      el.value = typ[k] || ""; el.dataset.dflt = typ[k] ? "1" : ""; el.classList.remove("typ");
+      continue;
+    }
     el.value = typ[k] ? `${typ[k]} typ` : "";
     el.classList.toggle("typ", !!typ[k]);
   }
@@ -147,7 +154,29 @@ function setQrOptions(cands, chosen) {
   if (chosen != null) sel.value = cands.some((c) => c.u === chosen) ? chosen : "";
 }
 
+// ---------- navigation: each screen is a history entry, so Android's back swipe moves through the app:
+// editor -> search results -> empty search screen (and only then out of the app)
+const view = () => (history.state && history.state.v) || "home";
+function go(v) { if (view() !== v) history.pushState({ v }, ""); }
+function showHome() {
+  clearTimeout(t);
+  $("#q").value = "";
+  $("#editor").hidden = true; $("#bar").hidden = true;
+  $("#results").innerHTML = ""; $("#results").hidden = false;
+  $("#status").hidden = false; $("#status").textContent = homeStatus || $("#status").textContent;
+  window.scrollTo(0, 0);
+}
+window.addEventListener("popstate", () => {
+  if ($("#sizeDlg").open) $("#sizeDlg").close();
+  const v = view();
+  if (v === "home") showHome();
+  else if (v === "results") backToSearch();
+  // "editor" is only reached by going forward again; the editor still holds the last label
+  else if (current) showEditor($("#src").textContent, !!current.custom);
+});
+
 function showEditor(srcText, custom) {
+  go("editor");
   $("#src").textContent = srcText;
   $("#customnote").hidden = !custom;
   $("#forget").hidden = !(current && current.saved);
@@ -170,8 +199,9 @@ function open(it) {
     flow: "", td: it.td != null ? String(it.td) : "",
   };
   for (const [k, v] of Object.entries(vals)) { e[k].value = v; e[k].classList.remove("typ"); }
+  e.dry.dataset.dflt = "";
   e.fl_hard.checked = it.ab; e.fl_enc.checked = needsEnclosure(f.enc);
-  e.fl_hygro.checked = false; e.opened.checked = true;
+  e.fl_hygro.checked = false; e.opened.checked = true; e.purchased.value = "";
   const m = f.material.toUpperCase();
   e.material.value = DB.defaults[m] ? m : "";
   applyMaterial(f.material, f.enc);
@@ -226,6 +256,14 @@ function formValues() {
   return v;
 }
 
+// yyyy-mm-dd (date input) -> "14 Nov 26" (short enough for the dates row); "" stays blank for handwriting
+function fmtDate(v) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v || "");
+  if (!m) return "";
+  const mon = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][+m[2] - 1];
+  return `${+m[3]} ${mon} ${m[1].slice(2)}`;
+}
+
 function spec() {
   const e = $("#f").elements;
   const flags = [];
@@ -238,7 +276,7 @@ function spec() {
     rows: [["Nozzle", e.nozzle.value.trim()], ["Bed Temp", e.bed.value.trim()],
            ["Chamber", e.chamber.value.trim()], ["Dry", e.dry.value.trim()],
            ["Flow Ratio", e.flow.value.trim()], ["TD", e.td.value.trim()]],
-    flags, opened: e.opened.checked, qr_url: e.qr.value.trim(),
+    flags, opened: e.opened.checked, purchased: fmtDate(e.purchased.value), qr_url: e.qr.value.trim(),
   };
 }
 
@@ -304,6 +342,10 @@ function backToSearch() {
 var t = null;
 $("#q").addEventListener("input", (e) => {
   clearTimeout(t);
+  const q = e.target.value.trim();
+  if (view() === "editor") history.back();                                 // typing in the editor -> back to results
+  else if (q && view() === "home") go("results");
+  else if (!q && view() === "results") { history.back(); return; }        // empty box = the main search screen
   t = setTimeout(() => {
     $("#editor").hidden = true; $("#bar").hidden = true; $("#results").hidden = false; $("#status").hidden = false;
     showResults(search(e.target.value));
@@ -312,15 +354,16 @@ $("#q").addEventListener("input", (e) => {
 $("#f").addEventListener("input", (e) => {
   if (e.target.name === "qrpick") $("#f").elements.qr.value = e.target.value;
   else if (e.target.name === "material") applyMaterial(e.target.value);
-  else if (e.target.classList) e.target.classList.remove("typ");
+  else if (e.target.classList) { e.target.classList.remove("typ"); if (e.target.dataset) e.target.dataset.dflt = ""; }
   draw();
 });
 $("#f").addEventListener("submit", (e) => e.preventDefault());
-$("#back").onclick = () => { backToSearch(); $("#q").focus(); };
+$("#back").onclick = () => { if (view() === "editor") history.back(); else backToSearch(); };
 $("#forget").onclick = () => {
   if (!current || !current.saved || !confirm("Delete this saved custom label from this phone?")) return;
   customs = customs.filter((c) => c !== current.saved); storeCustoms();
-  current.saved = null; backToSearch();
+  current.saved = null;
+  if (view() === "editor") history.back(); else backToSearch();
 };
 $("#clone").onclick = copyAsCustom;
 // Save / Share first ask for the size (pre-filled with the last choice), then write the PNG at that size
@@ -370,6 +413,7 @@ try {
   if (navigator.canShare && navigator.canShare({ files: [new File([""], "x.png", { type: "image/png" })] })) $("#share").hidden = false;
 } catch (e) { /* no share */ }
 
+history.replaceState({ v: "home" }, "");                                  // the app's first screen
 Promise.all([loadData(), LabelRender.loadFonts("fonts/")])
   .then(() => { if ($("#q").value) showResults(search($("#q").value)); })
   .catch((e) => { $("#status").textContent = "Could not load the database: " + e.message; });

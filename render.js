@@ -138,11 +138,27 @@
     const flags = (spec.flags || []).filter(Boolean);
     const opened = spec.opened !== false;
     if (opened) {
-      const om = M("Opened:", 24 * k, "Bold");
-      const base = H - 1 - om.d - 1;               // text sits just above the rule row
-      put("Opened:", om, 0, base);
-      rect(om.w + K(6), H - 1, Math.floor(W * 0.75), H - 1);   // rule on the very last row
-      bottom = base - om.a - K(6);
+      // "Purchased: ____   Opened: ____" on one bold row; the writing rules (2 px) sit on the bottom edge.
+      // A purchased date from the form prints instead of its rule.
+      const purchased = spec.purchased || "";
+      const lineH = Math.max(2, K(2)), gapX = K(14);
+      let size = Math.round(27 * k), pm, om, dm, ruleW;
+      for (;; size--) {
+        pm = M("Purchased:", size, "Bold"); om = M("Opened:", size, "Bold");
+        dm = purchased ? M(purchased, size, "Bold") : null;
+        const fixed = pm.w + om.w + (dm ? dm.w + K(6) : 0) + 2 * K(6) + gapX;
+        ruleW = Math.floor((W - fixed) / (dm ? 1 : 2));
+        if (ruleW >= K(50) || size <= 10) break;
+      }
+      const base = H - lineH - 1 - Math.max(pm.d, om.d, 0);   // text sits just above the rules
+      let x = 0;
+      put("Purchased:", pm, x, base); x += pm.w + K(6);
+      if (dm) { put(purchased, dm, x, base); x += dm.w; }
+      else { rect(x, H - lineH, x + ruleW - 1, H - 1); x += ruleW; }
+      x += gapX;
+      put("Opened:", om, x, base); x += om.w + K(6);
+      rect(x, H - lineH, W - 1, H - 1);                        // Opened's rule runs to the right edge
+      bottom = base - Math.max(pm.a, om.a) - K(8);
     }
     if (flags.length) {
       const ch = K(26), gap = K(4), fm = (s) => M(s, 21 * k, "cond");   // the usual three flags fit one row
