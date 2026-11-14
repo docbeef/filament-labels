@@ -1,9 +1,12 @@
-/* Filament Labels: search the bundled database, edit, render the M02 sticker, save the PNG. */
+/* Filament Labels: search the bundled database (or make a custom label), edit, render the M02 sticker, save the PNG. */
 /* global LabelRender */
 "use strict";
 const $ = (s) => document.querySelector(s);
 const norm = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
-let DB = null, items = [], current = null;
+let DB = null, items = [], customs = [], current = null;
+const FIELDS = ["brand", "line", "color", "hex", "nozzle", "bed", "chamber", "dry", "flow", "td", "qr"];
+const CHECKS = ["fl_hard", "fl_enc", "fl_hygro", "opened"];
+const TYP_FIELDS = ["nozzle", "bed", "chamber", "dry"];
 
 // ---------- data
 async function loadData() {
@@ -22,16 +25,36 @@ async function loadData() {
     const hay = `${f.brand} ${f.line} ${f.material} ${v[1]}`.toLowerCase();
     return { f, color: v[1], hex: v[2], td: v[3], ab: !!v[4], url: v[5], hay, hayN: norm(hay) };
   });
+  const sel = $("#f").elements.material;
+  sel.add(new Option("— none —", ""));
+  for (const m of Object.keys(DB.defaults).sort()) sel.add(new Option(m, m));
+  loadCustoms();
   $("#ver").textContent = `· db ${data.version}`;
   $("#status").textContent = `${items.length.toLocaleString()} colours from ${data.brands.length} brands. Type to search.`;
 }
 
+// ---------- saved custom labels (this device only)
+const STORE = "filament-labels.custom.v1";
+function loadCustoms() {
+  try { customs = JSON.parse(localStorage.getItem(STORE) || "[]"); } catch (e) { customs = []; }
+  customs.forEach(indexCustom);
+}
+function indexCustom(c) {
+  c.hay = `${c.values.brand} ${c.values.line} ${c.values.material} ${c.values.color}`.toLowerCase();
+  c.hayN = norm(c.hay); c.custom = true;
+}
+function storeCustoms() {
+  try { localStorage.setItem(STORE, JSON.stringify(customs.map(({ id, values }) => ({ id, values })))); }
+  catch (e) { /* private mode / storage blocked: the label still saves as a PNG */ }
+}
+
+// ---------- search
 function search(q) {
   const toks = q.toLowerCase().split(/\s+/).filter(Boolean);
   if (!toks.length) return [];
   const out = [];
-  for (const it of items) {
-    let score = 0, ok = true;
+  for (const it of customs.concat(items)) {
+    let score = it.custom ? 3 : 0, ok = true;
     for (const t of toks) {
       const i = it.hay.indexOf(t);
       if (i >= 0) score += i === 0 || it.hay[i - 1] === " " ? 2 : 1;
@@ -44,19 +67,34 @@ function search(q) {
   return out.slice(0, 60).map((x) => x[1]);
 }
 
+function row(swatch, top, bottom, onclick, cls) {
+  const li = document.createElement("li");
+  if (cls) li.className = cls;
+  const sw = document.createElement("span"); sw.className = "sw";
+  if (swatch.startsWith("#")) sw.style.background = swatch; else sw.textContent = swatch;
+  const t = document.createElement("div");
+  t.innerHTML = `<div class="r1"></div><div class="r2"></div>`;
+  t.children[0].textContent = top; t.children[1].textContent = bottom;
+  li.append(sw, t); li.onclick = onclick;
+  return li;
+}
+
 function showResults(list) {
   const ul = $("#results"); ul.innerHTML = "";
-  for (const it of list) {
-    const li = document.createElement("li");
-    const sw = document.createElement("span"); sw.className = "sw"; sw.style.background = it.hex || "transparent";
-    const t = document.createElement("div");
-    t.innerHTML = `<div class="r1"></div><div class="r2"></div>`;
-    t.children[0].textContent = `${it.f.brand} · ${lineOf(it.f)}`;
-    t.children[1].textContent = `${it.color}${it.f.noz[0] ? ` · ${range(it.f.noz)}` : ""}`;
-    li.append(sw, t); li.onclick = () => open(it); ul.appendChild(li);
-  }
   const q = $("#q").value.trim();
-  $("#status").textContent = q ? (list.length ? `${list.length}${list.length === 60 ? "+" : ""} matches` : "No matches. Try fewer words.") : $("#status").textContent;
+  for (const it of list) {
+    if (it.custom) {
+      const v = it.values;
+      ul.appendChild(row(v.hex && /^#[0-9a-f]{6}$/i.test(v.hex) ? v.hex : "★", `★ ${v.brand} · ${v.line}`,
+        `${v.color}${v.nozzle ? ` · ${v.nozzle}` : ""} · saved custom`, () => openCustom(it)));
+    } else {
+      ul.appendChild(row(it.hex || "#00000000", `${it.f.brand} · ${lineOf(it.f)}`,
+        `${it.color}${it.f.noz[0] ? ` · ${range(it.f.noz)}` : ""}`, () => open(it)));
+    }
+  }
+  if (q) ul.appendChild(row("＋", "Custom label", list.length ? "Not listed? Start from a blank label" : "Fill it in yourself",
+    () => openCustom(null, q), "custom"));
+  if (q) $("#status").textContent = list.length ? `${list.length}${list.length === 60 ? "+" : ""} matches` : "No matches — make a custom label, or try fewer words.";
 }
 
 // ---------- label values
@@ -69,9 +107,25 @@ const range = ([lo, hi], u = "°C") =>
   lo != null && hi != null && lo !== hi ? `${lo}–${hi}${u}` : (lo ?? hi) != null ? `${lo ?? hi}${u}` : "";
 function dryStr([t, h]) { return t ? `${t}°C${h ? ` × ${h}h` : ""}` : ""; }
 
-function defaultsFor(f) {
-  const m = f.material.toUpperCase();
+function defaultsFor(material) {
+  const m = String(material || "").toUpperCase();
   return DB.defaults[m] || DB.defaults[m.replace(/[-+ ].*$/, "")] || {};
+}
+const needsEnclosure = (enc) => enc === "required" || enc === "recommended";
+
+// Fill empty (or still-typical) temp fields with the material's typical values, marked "typ".
+function applyMaterial(material, ownEnc) {
+  const e = $("#f").elements, d = defaultsFor(material);
+  const enc = ownEnc || (d.enc ? d.enc[0] : "");
+  const typ = { nozzle: d.noz && range(d.noz), bed: d.bed && range(d.bed),
+                chamber: needsEnclosure(enc) && d.cham ? range(d.cham) : "", dry: d.dry && dryStr(d.dry) };
+  for (const k of TYP_FIELDS) {
+    const el = e[k];
+    if (el.value && !el.classList.contains("typ")) continue;      // never overwrite a real value
+    el.value = typ[k] ? `${typ[k]} typ` : "";
+    el.classList.toggle("typ", !!typ[k]);
+  }
+  if (needsEnclosure(enc)) e.fl_enc.checked = true;
 }
 
 function qrCandidates(it) {
@@ -85,43 +139,71 @@ function qrCandidates(it) {
   return c;
 }
 
-function open(it) {
-  current = it;
-  const f = it.f, d = defaultsFor(f), form = $("#f");
-  const typ = new Set();
-  const val = (own, def, fmt, key) => {
-    if (own) return own;
-    const v = def ? fmt(def) : "";
-    if (v) { typ.add(key); return `${v} typ`; }
-    return "";
-  };
-  const enc = f.enc || (d.enc ? d.enc[0] : "");
-  const needsEnc = enc === "required" || enc === "recommended";
-  const vals = {
-    brand: f.brand, line: lineOf(f), color: it.color, hex: it.hex,
-    nozzle: val(range(f.noz), d.noz, range, "nozzle"),
-    bed: val(range(f.bed), d.bed, range, "bed"),
-    chamber: val(range(f.cham), needsEnc ? d.cham : null, range, "chamber"),
-    dry: val(dryStr(f.dry), d.dry, dryStr, "dry"),
-    flow: "", td: it.td != null ? String(it.td) : "", qr: "",
-  };
-  for (const [k, v] of Object.entries(vals)) {
-    const el = form.elements[k]; el.value = v; el.classList.toggle("typ", typ.has(k));
-  }
-  form.elements.fl_hard.checked = it.ab;
-  form.elements.fl_enc.checked = needsEnc;
-  form.elements.fl_hygro.checked = false;
-  form.elements.opened.checked = true;
-  const sel = form.elements.qrpick; sel.innerHTML = "";
-  for (const c of qrCandidates(it)) sel.add(new Option(`${c.label} (${c.u.length} chars)`, c.u));
-  sel.add(new Option("None (no QR)", ""));
-  form.elements.qr.value = sel.options[0].value;
-  const srcName = { o: "Open Filament Database", s: "SpoolmanDB", os: "Open Filament Database + SpoolmanDB" }[f.src];
-  $("#src").textContent = `Source: ${srcName}. Check values against the box before printing.`;
+function setQrOptions(cands, chosen) {
+  const e = $("#f").elements, sel = e.qrpick; sel.innerHTML = "";
+  for (const c of cands) sel.add(new Option(`${c.label} (${c.u.length} chars)`, c.u));
+  sel.add(new Option(cands.length ? "None (no QR)" : "Type a link below, or leave empty for no QR", ""));
+  e.qr.value = chosen != null ? chosen : sel.options[0].value;
+  if (chosen != null) sel.value = cands.some((c) => c.u === chosen) ? chosen : "";
+}
+
+function showEditor(srcText, custom) {
+  $("#src").textContent = srcText;
+  $("#customnote").hidden = !custom;
+  $("#forget").hidden = !(current && current.saved);
   $("#results").hidden = true; $("#editor").hidden = false; $("#bar").hidden = false;
   $("#status").hidden = true;
   window.scrollTo(0, 0);
   draw();
+}
+
+function open(it) {
+  current = { item: it };
+  const f = it.f, e = $("#f").elements;
+  const vals = {
+    brand: f.brand, line: lineOf(f), color: it.color, hex: it.hex,
+    nozzle: range(f.noz), bed: range(f.bed), chamber: range(f.cham), dry: dryStr(f.dry),
+    flow: "", td: it.td != null ? String(it.td) : "",
+  };
+  for (const [k, v] of Object.entries(vals)) { e[k].value = v; e[k].classList.remove("typ"); }
+  e.fl_hard.checked = it.ab; e.fl_enc.checked = needsEnclosure(f.enc);
+  e.fl_hygro.checked = false; e.opened.checked = true;
+  const m = f.material.toUpperCase();
+  e.material.value = DB.defaults[m] ? m : "";
+  applyMaterial(f.material, f.enc);
+  setQrOptions(qrCandidates(it));
+  const srcName = { o: "Open Filament Database", s: "SpoolmanDB", os: "Open Filament Database + SpoolmanDB" }[f.src];
+  showEditor(`Source: ${srcName}. Check values against the box before printing.`, false);
+}
+
+// saved = a stored custom label (restore exactly); otherwise a blank one, optionally guessing the material from the search text
+function openCustom(saved, query) {
+  current = { custom: true, saved: saved || null };
+  const e = $("#f").elements;
+  if (saved) {
+    const v = saved.values;
+    for (const k of FIELDS) { e[k].value = v[k] || ""; e[k].classList.toggle("typ", (v.typ || []).includes(k)); }
+    for (const k of CHECKS) e[k].checked = !!v[k];
+    e.material.value = v.material || "";
+    setQrOptions([], v.qr || "");
+  } else {
+    for (const k of FIELDS) { e[k].value = ""; e[k].classList.remove("typ"); }
+    e.fl_hard.checked = false; e.fl_enc.checked = false; e.fl_hygro.checked = false; e.opened.checked = true;
+    const words = String(query || "").toUpperCase().split(/\s+/);
+    const guess = Object.keys(DB.defaults).filter((m) => words.includes(m)).sort((a, b) => b.length - a.length)[0] || "";
+    e.material.value = guess;
+    if (guess) { applyMaterial(guess); e.line.value = guess; }
+    setQrOptions([]);
+  }
+  showEditor(saved ? "Your saved custom label." : "Custom label: fill in what's on the box. Pick a material to get typical temps.", true);
+  if (!saved) e.brand.focus({ preventScroll: true });
+}
+
+function formValues() {
+  const e = $("#f").elements, v = { material: e.material.value, typ: [] };
+  for (const k of FIELDS) { v[k] = e[k].value.trim(); if (e[k].classList.contains("typ")) v.typ.push(k); }
+  for (const k of CHECKS) v[k] = e[k].checked;
+  return v;
 }
 
 function spec() {
@@ -151,12 +233,23 @@ function draw() {
 
 function fileName() {
   const s = spec();
-  return [s.brand, s.line, s.color].map((x) => x.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")).filter(Boolean).join("_") + ".png";
+  return ([s.brand, s.line, s.color].map((x) => x.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")).filter(Boolean).join("_") || "custom-label") + ".png";
 }
 
 function blob() { return new Promise((res) => lastCanvas.toBlob(res, "image/png")); }
 
+function rememberCustom() {
+  if (!current || !current.custom) return;
+  const values = formValues();
+  if (!values.brand && !values.line && !values.color) return;
+  let c = current.saved;
+  if (!c) { c = { id: Date.now().toString(36) }; customs.unshift(c); current.saved = c; }
+  c.values = values; indexCustom(c); storeCustoms();
+  $("#forget").hidden = false;
+}
+
 async function save() {
+  rememberCustom();
   const b = await blob();
   const a = document.createElement("a");
   a.href = URL.createObjectURL(b); a.download = fileName();
@@ -165,8 +258,14 @@ async function save() {
 }
 
 async function share() {
+  rememberCustom();
   const file = new File([await blob()], fileName(), { type: "image/png" });
   try { await navigator.share({ files: [file] }); } catch (e) { /* cancelled */ }
+}
+
+function backToSearch() {
+  $("#editor").hidden = true; $("#bar").hidden = true; $("#results").hidden = false; $("#status").hidden = false;
+  showResults(search($("#q").value));
 }
 
 // ---------- wiring
@@ -180,13 +279,16 @@ $("#q").addEventListener("input", (e) => {
 });
 $("#f").addEventListener("input", (e) => {
   if (e.target.name === "qrpick") $("#f").elements.qr.value = e.target.value;
-  if (e.target.classList) e.target.classList.remove("typ");
+  else if (e.target.name === "material") applyMaterial(e.target.value);
+  else if (e.target.classList) e.target.classList.remove("typ");
   draw();
 });
 $("#f").addEventListener("submit", (e) => e.preventDefault());
-$("#back").onclick = () => {
-  $("#editor").hidden = true; $("#bar").hidden = true; $("#results").hidden = false; $("#status").hidden = false;
-  $("#q").focus();
+$("#back").onclick = () => { backToSearch(); $("#q").focus(); };
+$("#forget").onclick = () => {
+  if (!current || !current.saved || !confirm("Delete this saved custom label from this phone?")) return;
+  customs = customs.filter((c) => c !== current.saved); storeCustoms();
+  current.saved = null; backToSearch();
 };
 $("#save").onclick = save;
 $("#share").onclick = share;

@@ -1,5 +1,5 @@
 // Offline: cache-first app shell. Bump VERSION on every deploy (and after rebuilding data.json).
-const VERSION = "fl-2026-11-13a";
+const VERSION = "fl-2026-11-14a";
 const FILES = ["./", "index.html", "app.js", "render.js", "qrcode.js", "data.json", "brand-urls.json",
   "manifest.webmanifest", "icon-192.png", "icon-512.png",
   "fonts/BarlowSemiCondensed-Bold.ttf", "fonts/BarlowSemiCondensed-Medium.ttf", "fonts/BarlowCondensed-SemiBold.ttf"];
